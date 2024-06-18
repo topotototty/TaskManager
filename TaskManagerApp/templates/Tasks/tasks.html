@@ -1,0 +1,428 @@
+{% extends 'base.html' %}
+
+{% block title_name %} Задачи {% endblock %}
+
+{% block content %}
+    <div class="container-fluid">
+        <h2 class="d-inline-block" style="text-align: center; margin-bottom: 20px">Активные задачи</h2>
+
+        <div class="d-flex justify-content-start align-items-center mb-3">
+            <div>
+                {% if user.is_authenticated and employee and employee.position.title == 'Администратор' or employee.position.title == 'Менеджер' %}
+                    <button class="btn btn-outline-dark" data-toggle="modal" data-target="#addTaskModal">
+                        Назначить задачу
+                    </button>
+                    <button class="btn btn-outline-dark" onclick="generatePDF('activeTasksTable', 'active_tasks.pdf')">
+                        Экспортировать активные в PDF
+                    </button>
+                {% endif %}
+            </div>
+
+            {% if user.is_authenticated and employee and employee.position.title == 'Администратор' or employee.position.title == 'Менеджер' %}
+
+                <div class="d-flex">
+                <select id="assigneeFilter" class="form-control ml-2" onchange="filterTasks()">
+                    <option value="">Все исполнители</option>
+                    {% for employee in employees %}
+                        <option value="{{ employee.pk }}">{{ employee.last_name }} {{ employee.first_name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="statusFilter" class="form-control ml-2" onchange="filterTasks()">
+                    <option value="">Все статусы</option>
+                    {% for status in statuses %}
+                        <option value="{{ status.pk }}">{{ status.title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+        </div>
+
+        <table id="activeTasksTable" class="table table-hover" style="margin-top: 10px;">
+            <thead>
+            <tr style="text-align: left">
+                <th>Название</th>
+                <th>Описание</th>
+                <th>Срок сдачи</th>
+                <th>Исполнитель</th>
+                <th>Назначил</th>
+                <th>Статус</th>
+
+                {% if user.is_authenticated and employee and employee.position.title == 'Администратор' or employee.position.title == 'Менеджер' %}
+                    <th>Изменить</th>
+                    <th>Удалить</th>
+                {% endif %}
+
+                {% if user.is_authenticated and employee and employee.position.title != 'Администратор' %}
+                    <th>Принять</th>
+                {% endif %}
+            </tr>
+            </thead>
+            <tbody id="tasksBody">
+            {% for task in tasks %}
+                <tr data-assignee="{% if task.assignee %}{{ task.assignee.pk }}{% endif %}"
+                    data-status="{{ task.status.pk }}">
+                    <td>{{ task.title }}</td>
+                    <td>{{ task.description }}</td>
+                    <td>{{ task.deadline }}</td>
+                    <td>{{ task.assignee }}</td>
+                    <td>{{ task.assigner }}</td>
+                    <td>{{ task.status }}</td>
+
+                    {% if user.is_authenticated and employee and employee.position.title == 'Администратор' or employee.position.title == 'Менеджер' %}
+                        <td style="text-align: center">
+                            <a type="button" data-toggle="modal" data-target="#editTaskModal{{ task.pk }}"
+                               style="cursor: pointer;">
+                                <i class="fas fa-edit" style="color: black"></i>
+                            </a>
+                        </td>
+                        <td style="text-align: center">
+                            <a type="button" data-toggle="modal" data-target="#deleteModal{{ task.pk }}"
+                               style="cursor: pointer;">
+                                <i class="fas fa-trash" style="color: black"></i>
+                            </a>
+                        </td>
+                    {% endif %}
+
+                    {% if user.is_authenticated and employee and employee.position.title != 'Администратор' %}
+                        {% if task.assigner != employee %}
+                            <td style="text-align: center">
+                                <a type="button" data-toggle="modal" data-target="#acceptModal{{ task.pk }}">
+                                    <i class="fas fa-plus" style="color: black"></i>
+                                </a>
+                            </td>
+                        {% else %}
+                            <td style="text-align: center">
+                                <a type="button" onclick="showErrorMessage('{{ task.pk }}', 'accept')"
+                                   style="cursor: pointer;">
+                                    <i class="fas fa-plus" style="color: black"></i>
+                                </a>
+                            </td>
+                        {% endif %}
+                    {% endif %}
+                </tr>
+
+                <!-- Accept Confirmation Modal -->
+                <div class="modal fade" id="acceptModal{{ task.pk }}" tabindex="-1" role="dialog"
+                     aria-labelledby="acceptModalLabel{{ task.pk }}" aria-hidden="true">
+                    <div class="modal-dialog" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="acceptModalLabel{{ task.pk }}">Принять задачу</h5>
+                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                Вы уверены, что хотите принять эту задачу?
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                                <form method="post" action="{% url 'accept_task' task.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-primary">Принять</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delete Confirmation Modal -->
+                <div class="modal fade" id="deleteModal{{ task.pk }}" tabindex="-1" role="dialog"
+                     aria-labelledby="deleteModalLabel{{ task.pk }}" aria-hidden="true">
+                    <div class="modal-dialog" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="deleteModalLabel{{ task.pk }}">Подтверждение удаления</h5>
+                                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                            <div class="modal-body">
+                                Вы уверены, что хотите удалить задачу "{{ task.title }}"?
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                                <form method="post" action="{% url 'delete_task' task.pk %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-danger">Удалить</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Edit Task Modal -->
+                <div class="modal fade" id="editTaskModal{{ task.pk }}" tabindex="-1" role="dialog"
+                     aria-labelledby="editTaskModalLabel{{ task.pk }}" aria-hidden="true">
+                    <div class="modal-dialog" role="document">
+                        <div class="modal-content">
+                            <form method="post" action="{% url 'edit_task' task.pk %}">
+                                {% csrf_token %}
+                                <div class="modal-header">
+                                    <h5 class="modal-title" id="editTaskModalLabel{{ task.pk }}">Изменить задачу</h5>
+                                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="form-group">
+                                        <label for="taskTitle">Название</label>
+                                        <input type="text" class="form-control" id="taskTitle" name="title"
+                                               value="{{ task.title }}" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="taskDescription">Описание</label>
+                                        <textarea class="form-control" id="taskDescription" name="description" rows="3"
+                                                  required>{{ task.description }}</textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="taskDeadline">Срок сдачи</label>
+                                        <input type="date" class="form-control" id="taskDeadline" name="deadline"
+                                               value="{{ task.deadline }}" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="taskAssignee">Исполнитель</label>
+                                        <select class="form-control" id="taskAssignee" name="assignee">
+                                            <option value="">Не назначен</option>
+                                            {% for employee in employees %}
+                                                {% if employee.position.title != "Администратор" %}
+                                                    <option value="{{ employee.pk }}"
+                                                            {% if task.assignee and task.assignee.pk == employee.pk %}selected{% endif %}>{{ employee.last_name }} {{ employee.first_name }}</option>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                                    <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        {% if user.is_authenticated and employee and employee.position.title == 'Администратор' %}
+            <h2 style="margin-top: 30px">Выполненные задачи</h2>
+            <button class="btn btn-outline-dark" onclick="generatePDF('completedTasksTable', 'completed_tasks.pdf')"
+                    style="margin-left: 0px; margin-bottom: 10px">
+                Экспортировать выполненные в PDF
+            </button>
+            <table id="completedTasksTable" class="table table-hover" style="margin-bottom: 60px;">
+                <thead>
+                <tr style="text-align: left">
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Срок сдачи</th>
+                    <th>Исполнитель</th>
+                    <th>Назначил</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for task in completed_tasks %}
+                    <tr style="text-align: left;">
+                        <td>{{ task.title }}</td>
+                        <td>{{ task.description }}</td>
+                        <td>{{ task.deadline }}</td>
+                        <td>{{ task.assignee }}</td>
+                        <td>{{ task.assigner }}</td>
+                        <td>{{ task.status }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <h2 style="margin-top: 30px">Просроченные задачи</h2>
+            <button class="btn btn-outline-dark" onclick="generatePDF('overdueTasksTable', 'overdue_tasks.pdf')"
+                    style="margin-left: 0px; margin-bottom: 10px">
+                Экспортировать просроченные в PDF
+            </button>
+            <table id="overdueTasksTable" class="table table-hover" style="margin-bottom: 60px;">
+                <thead>
+                <tr style="text-align: left">
+                    <th>Название</th>
+                    <th>Описание</th>
+                    <th>Срок сдачи</th>
+                    <th>Исполнитель</th>
+                    <th>Назначил</th>
+                    <th>Статус</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for task in overdue_tasks %}
+                    <tr style="text-align: left;">
+                        <td>{{ task.title }}</td>
+                        <td>{{ task.description }}</td>
+                        <td>{{ task.deadline }}</td>
+                        <td>{{ task.assignee }}</td>
+                        <td>{{ task.assigner }}</td>
+                        <td>{{ task.status }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
+
+    <div class="modal fade" id="errorMessageModal" tabindex="-1" role="dialog" aria-labelledby="errorMessageModalLabel"
+         aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="errorMessageModalLabel">Ошибка</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p id="errorMessage"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addTaskModal" tabindex="-1" role="dialog" aria-labelledby="addTaskModalLabel"
+         aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <form method="post" action="{% url 'add_task' %}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="addTaskModalLabel">Назначить задачу</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="taskTitle">Название</label>
+                            <input type="text" class="form-control" id="taskTitle" name="title" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="taskDescription">Описание</label>
+                            <textarea class="form-control" id="taskDescription" name="description" rows="3"
+                                      required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="taskDeadline">Срок сдачи</label>
+                            <input type="date" class="form-control" id="taskDeadline" name="deadline" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="taskAssignee">Исполнитель</label>
+                            <select class="form-control" id="taskAssignee" name="assignee">
+                                <option value="">Не назначен</option>
+                                {% for employee in employees %}
+                                    {% if employee.position.title != "Администратор" %}
+                                        <option value="{{ employee.pk }}">{{ employee.last_name }} {{ employee.first_name }}</option>
+                                    {% endif %}
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                        <button type="submit" class="btn btn-primary">Назначить</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+     <script>
+        function generatePDF(tableId, filename) {
+            const element = document.getElementById(tableId);
+            html2pdf(element, {
+                filename: filename,
+                html2canvas: {dpi: 192, letterRendering: true}
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            var sortAscButton = document.getElementById("sortAsc");
+            var sortDescButton = document.getElementById("sortDesc");
+
+            sortAscButton.addEventListener("click", function () {
+                sortTable(true);
+            });
+
+            sortDescButton.addEventListener("click", function () {
+                sortTable(false);
+            });
+
+            function sortTable(asc) {
+                var tbody = document.querySelector("#activeTasksTable tbody");
+                var rows = Array.from(tbody.querySelectorAll("tr"));
+
+                rows.sort(function (a, b) {
+                    var nameA = a.cells[0].textContent.trim().toLowerCase();
+                    var nameB = b.cells[0].textContent.trim().toLowerCase();
+
+                    if (asc) {
+                        return nameA.localeCompare(nameB);
+                    } else {
+                        return nameB.localeCompare(nameA);
+                    }
+                });
+
+                rows.forEach(function (row) {
+                    tbody.appendChild(row);
+                });
+            }
+        });
+    </script>
+
+    <script>
+        function showTaskDetails(title, description, deadline, assignee, status) {
+            $('#taskTitle').text('Название: ' + title);
+            $('#taskDescription').text('Описание: ' + description);
+            $('#taskDeadline').text('Сроки выполнения: ' + deadline);
+            $('#taskAssignee').text('Исполнитель: ' + assignee);
+            $('#taskStatus').text('Статус: ' + status);
+            $('#taskModal').modal('show');
+        }
+
+        function showErrorMessage(taskId, action) {
+            let message;
+            if (action === 'edit') {
+                message = "Вы не можете изменить эту задачу";
+            } else if (action === 'delete') {
+                message = "Вы не можете удалить эту задачу";
+            } else if (action === 'accept') {
+                message = "Вы не можете принять свою задачу";
+            }
+            $('#errorMessage').text(message);
+            $('#errorMessageModal').modal('show');
+        }
+
+        function filterTasks() {
+            var assigneeFilter = document.getElementById('assigneeFilter').value;
+            var statusFilter = document.getElementById('statusFilter').value;
+            var tasks = document.querySelectorAll('#tasksBody tr');
+
+            tasks.forEach(function (task) {
+                var taskAssignee = task.getAttribute('data-assignee');
+                var taskStatus = task.getAttribute('data-status');
+
+                var assigneeMatch = assigneeFilter === '' || taskAssignee === assigneeFilter;
+                var statusMatch = statusFilter === '' || taskStatus === statusFilter;
+
+                if (assigneeMatch && statusMatch) {
+                    task.style.display = '';
+                } else {
+                    task.style.display = 'none';
+                }
+            });
+        }
+    </script>
+
+    <script src="https://raw.githack.com/eKoopmans/html2pdf/master/dist/html2pdf.bundle.js"></script>
+
+{% endblock %}
