@@ -1,23 +1,24 @@
 import datetime
-
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.models import User
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse_lazy
 from django.utils.decorators import method_decorator
 from django.views import View
-from .models import *
+from .models import Employee, Position, TaskStatus, Tasks
 
 def get_employee(request):
     return get_object_or_404(Employee, user=request.user)
 
+
 def get_task_status(title):
     return get_object_or_404(TaskStatus, title=title)
 
+
 def login_view(request):
-    error_message = None
     if request.method == 'POST':
         username = request.POST.get('username')
         password = request.POST.get('password')
@@ -26,21 +27,23 @@ def login_view(request):
             login(request, user)
             return redirect('profile')
         else:
-            error_message = 'Неправильное имя пользователя или пароль.'
-    return render(request, 'Auth/login.html', {'error_message': error_message})
+            messages.error(request, 'Неправильное имя пользователя или пароль.')
+    return render(request, 'Auth/login.html')
+
 
 @login_required(login_url=reverse_lazy('login'))
 def profile_view(request):
     employee = get_employee(request)
-    assigned_status = get_task_status("Назначена")
-    in_progress_status = get_task_status("Взята в работу")
-    completed_status = get_task_status("Выполнена")
+    statuses = {
+        "assigned": get_task_status("Назначена"),
+        "in_progress": get_task_status("Взята в работу"),
+        "completed": get_task_status("Выполнена"),
+    }
 
     employees = Employee.objects.exclude(position__title="Администратор")
-
-    tasks_assigned_by_user = Tasks.objects.filter(assigner=employee, status__in=[assigned_status, in_progress_status])
-    tasks_assigned_to_user = Tasks.objects.filter(assignee=employee, status=in_progress_status)
-    completed_tasks_by_user = Tasks.objects.filter(assignee=employee, status=completed_status)
+    tasks_assigned_by_user = Tasks.objects.filter(assigner=employee, status__in=[statuses["assigned"], statuses["in_progress"]])
+    tasks_assigned_to_user = Tasks.objects.filter(assignee=employee, status=statuses["in_progress"])
+    completed_tasks_by_user = Tasks.objects.filter(assignee=employee, status=statuses["completed"])
 
     return render(request, 'Profile/profile.html', {
         'employee': employee,
@@ -50,14 +53,17 @@ def profile_view(request):
         'employees': employees
     })
 
+
 def logout_view(request):
     logout(request)
     return redirect(reverse_lazy('login'))
+
 
 @login_required(login_url=reverse_lazy('login'))
 def position_list(request):
     positions = Position.objects.all()
     return render(request, 'Positions/positions.html', {'positions': positions})
+
 
 class AddPositionView(View):
     def post(self, request):
@@ -67,6 +73,7 @@ class AddPositionView(View):
         )
         return redirect('position_list')
 
+
 class EditPositionView(View):
     def post(self, request, pk):
         position = get_object_or_404(Position, pk=pk)
@@ -74,6 +81,7 @@ class EditPositionView(View):
         position.salary = request.POST.get('salary')
         position.save()
         return redirect('position_list')
+
 
 def delete_position(request, pk):
     position = get_object_or_404(Position, pk=pk)
@@ -85,19 +93,24 @@ def delete_position(request, pk):
             messages.success(request, "Должность успешно удалена.")
     return redirect('position_list')
 
+
 @login_required(login_url=reverse_lazy('login'))
 def employees_list(request):
     employees = Employee.objects.all()
     positions = Position.objects.all()
-    sorted_employees = None
+    sorted_employees = employees
 
     if request.method == 'POST':
         if 'sort_asc' in request.POST:
-            sorted_employees = Employee.objects.order_by('last_name', 'first_name')
+            sorted_employees = employees.order_by('last_name', 'first_name')
         elif 'sort_desc' in request.POST:
-            sorted_employees = Employee.objects.order_by('-last_name', '-first_name')
+            sorted_employees = employees.order_by('-last_name', '-first_name')
 
-    return render(request, 'Employees/employees.html', {'employees': employees, 'sorted_employees': sorted_employees, 'positions': positions})
+    return render(request, 'Employees/employees.html', {
+        'employees': sorted_employees,
+        'positions': positions
+    })
+
 
 class AddEmployeeView(View):
     def post(self, request):
@@ -120,6 +133,7 @@ class AddEmployeeView(View):
         )
         return redirect('employees_list')
 
+
 class EditEmployeeView(View):
     def post(self, request, employee_id):
         employee = get_object_or_404(Employee, pk=employee_id)
@@ -128,9 +142,10 @@ class EditEmployeeView(View):
         employee.middle_name = request.POST.get('middle_name')
         employee.phone_number = request.POST.get('phone_number')
         employee.email = request.POST.get('email')
-        employee.position_id = request.POST.get('position')
+        employee.position = get_object_or_404(Position, title=request.POST.get('position'))
         employee.save()
         return redirect('employees_list')
+
 
 def delete_employee(request, employee_id):
     employee = get_object_or_404(Employee, pk=employee_id)
@@ -143,26 +158,29 @@ def delete_employee(request, employee_id):
             messages.success(request, "Сотрудник успешно удален.")
     return redirect('employees_list')
 
+
 @login_required(login_url=reverse_lazy('login'))
 def tasks_list(request):
     employee = get_employee(request)
 
-    assigned_status = get_task_status("Назначена")
-    in_progress_status = get_task_status("Взята в работу")
-    completed_status = get_task_status("Выполнена")
-    overdue_status = get_task_status("Просрочена")
+    statuses = {
+        "assigned": get_task_status("Назначена"),
+        "in_progress": get_task_status("Взята в работу"),
+        "completed": get_task_status("Выполнена"),
+        "overdue": get_task_status("Просрочена"),
+    }
 
     employees = Employee.objects.exclude(position__title="Администратор")
-    statuses = TaskStatus.objects.all()
+    statuses_list = TaskStatus.objects.all()
 
     if employee.position.title in ['Администратор', 'Менеджер']:
-        tasks = Tasks.objects.filter(status__in=[assigned_status, in_progress_status])
-        completed_tasks = Tasks.objects.filter(status=completed_status)
-        overdue_tasks = Tasks.objects.filter(status=overdue_status)
+        tasks = Tasks.objects.filter(status__in=[statuses["assigned"], statuses["in_progress"]])
+        completed_tasks = Tasks.objects.filter(status=statuses["completed"])
+        overdue_tasks = Tasks.objects.filter(status=statuses["overdue"])
     else:
-        tasks = Tasks.objects.filter(status=assigned_status)
-        completed_tasks = Tasks.objects.filter(assigner=employee, status=completed_status)
-        overdue_tasks = Tasks.objects.filter(assigner=employee, status=overdue_status)
+        tasks = Tasks.objects.filter(status=statuses["assigned"])
+        completed_tasks = Tasks.objects.filter(assigner=employee, status=statuses["completed"])
+        overdue_tasks = Tasks.objects.filter(assigner=employee, status=statuses["overdue"])
 
     return render(request, 'Tasks/tasks.html', {
         'employee': employee,
@@ -170,8 +188,9 @@ def tasks_list(request):
         'completed_tasks': completed_tasks,
         'overdue_tasks': overdue_tasks,
         'employees': employees,
-        'statuses': statuses
+        'statuses': statuses_list
     })
+
 
 @login_required(login_url=reverse_lazy('login'))
 def accept_task(request, task_id):
@@ -189,6 +208,7 @@ def accept_task(request, task_id):
 
     return redirect('tasks_list')
 
+
 @login_required(login_url=reverse_lazy('login'))
 def complete_task(request, task_id):
     task = get_object_or_404(Tasks, pk=task_id)
@@ -198,6 +218,7 @@ def complete_task(request, task_id):
     task.save()
     messages.success(request, "Задача успешно завершена")
     return redirect('profile')
+
 
 @method_decorator(login_required, name='dispatch')
 class AddTaskView(View):
@@ -235,6 +256,7 @@ class AddTaskView(View):
 
         return redirect('tasks_list')
 
+
 @method_decorator(login_required, name='dispatch')
 class DeleteTaskView(View):
     def post(self, request, task_id):
@@ -248,6 +270,7 @@ class DeleteTaskView(View):
             messages.error(request, "Вы не можете удалить эту задачу")
 
         return redirect('tasks_list')
+
 
 @method_decorator(login_required, name='dispatch')
 class EditTaskView(View):
